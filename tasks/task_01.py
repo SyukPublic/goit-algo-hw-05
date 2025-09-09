@@ -8,6 +8,10 @@ import timeit
 from typing import Optional, Union
 from pathlib import Path
 
+from .knuth_morris_pratt import kmp_search
+from .boyer_moore import boyer_moore_search
+from .rabin_karp import rabin_karp_search
+
 
 def get_absolute_path(path: Union[Path, str], current_dir: Optional[Union[Path, str]] = None) -> Path:
     """Return the absolute path for the given path and the current directory
@@ -65,12 +69,15 @@ def load_text_file_data(file_path: Path, encoding: str = "utf-8") -> str:
         raise Exception("An unexpected error occurred: {error}.".format(error=repr(e)))
 
 
-def print_tests_result(datasets: list[tuple[str, str, str]], times: dict[str, dict[str, float]]) -> None:
+def print_tests_result(title: str, datasets: list[tuple[str, str, str]], times: dict[str, dict[str, float]]) -> None:
     """Print results table
 
+    :param title: Title of the result (String, mandatory)
     :param datasets: Datasets for result (List of tuple, mandatory)
     :param times: Results dictionary (Dictionary, optional)
     """
+
+    print(f"\n{title}\n")
 
     data_max_len = max([len(n) for n, *_ in datasets])
     algo_max_len = max([len(n) for n in times.keys()])
@@ -86,158 +93,11 @@ def print_tests_result(datasets: list[tuple[str, str, str]], times: dict[str, di
         )
 
 
-def kmp_search(text: str, search_pattern: str, find_all: bool = True) -> list[int]:
-    """Implementation of the Knuth-Morris-Pratt algorithm
-
-    :param text: The text in which the search is performed (String, mandatory)
-    :param search_pattern: The pattern string that needs to be found (String, mandatory)
-    :param find_all: Find all occurrences of the pattern in the text; otherwise, only the first one (Boolean, optional)
-    :return: Indexes of all positions where the string occurs in the text (List of integer)
-    """
-
-    def compute_lps(pattern: str) -> list[int]:
-        m = len(pattern)
-        table = [0] * m
-        length = 0
-        k = 1
-
-        while k < m:
-            if pattern[k] == pattern[length]:
-                length += 1
-                table[k] = length
-                k += 1
-            else:
-                if length != 0:
-                    length = table[length - 1]
-                else:
-                    table[k] = 0
-                    k += 1
-
-        return table
-
-    text_length, search_pattern_length = len(text), len(search_pattern)
-    if search_pattern_length == 0:
-        return []
-
-    lps = compute_lps(search_pattern)
-    matches = []
-    i, j = 0, 0
-    while i < text_length:
-        if search_pattern[j] == text[i]:
-            i += 1
-            j += 1
-            if j == search_pattern_length:
-                matches.append(i - j)
-                j = lps[j - 1]
-                if not find_all:
-                    break
-        else:
-            if j != 0:
-                j = lps[j - 1]
-            else:
-                i += 1
-
-    return matches
-
-
-def boyer_moore_search(text: str, search_pattern: str, find_all: bool = True) -> list[int]:
-    """Implementation of the Boyer-Moore algorithm
-
-    :param text: The text in which the search is performed (String, mandatory)
-    :param search_pattern: The pattern string that needs to be found (String, mandatory)
-    :param find_all: Find all occurrences of the pattern in the text; otherwise, only the first one (Boolean, optional)
-    :return: Indexes of all positions where the string occurs in the text (List of integer)
-    """
-
-    def build_bad_match_table(pattern: str) -> dict[str, int]:
-        table = {}
-        for k in range(len(pattern) - 1):
-            table[pattern[k]] = len(pattern) - 1 - k
-        return table
-
-    def compute_gst(pattern: str) -> list[int]:
-        table = [0] * len(pattern)
-        l = 0
-        for k in range(1, len(pattern)):
-            while l > 0 and pattern[l] != pattern[k]:
-                l = table[l - 1]
-            if pattern[l] == pattern[k]:
-                l += 1
-            table[k] = l
-        return table
-
-    text_length, search_pattern_length = len(text), len(search_pattern)
-    if search_pattern_length == 0:
-        return []
-
-    bad_match_table = build_bad_match_table(search_pattern)
-    gst = compute_gst(search_pattern)
-    matches = []
-    i = search_pattern_length - 1
-    while i < text_length:
-        j = search_pattern_length - 1
-        while j >= 0 and text[i] == search_pattern[j]:
-            i -= 1
-            j -= 1
-        if j == -1:
-            matches.append(i + 1)
-            i += search_pattern_length - gst[0] + 1
-            if not find_all:
-                break
-        else:
-            i += max(bad_match_table.get(text[i], search_pattern_length), search_pattern_length - j)
-    return matches
-
-
-def rabin_karp_search(text: str, search_pattern: str, find_all: bool = True) -> list[int]:
-    """Implementation of the Rabin-Karp algorithm
-
-    :param text: The text in which the search is performed (String, mandatory)
-    :param search_pattern: The pattern string that needs to be found (String, mandatory)
-    :param find_all: Find all occurrences of the pattern in the text; otherwise, only the first one (Boolean, optional)
-    :return: Indexes of all positions where the string occurs in the text (List of integer)
-    """
-    def calculate_hash(string: str) -> int:
-        hash_value = 0
-        for char in string:
-            hash_value = (hash_value * prime + ord(char)) % modulus
-        return hash_value
-
-    def rehash(old_hash: int, old_char: str, new_char: str) -> int:
-        new_hash = ((old_hash - ord(old_char) * high_power) * prime + ord(new_char)) % modulus
-        if new_hash < 0:
-            new_hash += modulus
-        return new_hash
-
-    text_length, search_pattern_length = len(text), len(search_pattern)
-    if search_pattern_length == 0:
-        return []
-
-    prime = 101
-    modulus = 10 ** 9 + 7
-    high_power = pow(prime, search_pattern_length - 1, modulus)
-
-    pattern_hash = calculate_hash(search_pattern)
-    text_hash = calculate_hash(text[:search_pattern_length])
-
-    matches = []
-    for i in range(text_length - search_pattern_length + 1):
-        if pattern_hash == text_hash:
-            if text[i:i + search_pattern_length] == search_pattern:
-                matches.append(i)
-                if not find_all:
-                    break
-
-        if i < text_length - search_pattern_length:
-            text_hash = rehash(text_hash, text[i], text[i + search_pattern_length])
-
-    return matches
-
-
 def search_algorithms_compare() -> None:
     try:
         article_1: str = load_text_file_data(get_absolute_path(Path(__file__).parent / "./__data__/стаття 1.txt"))
         article_2: str = load_text_file_data(get_absolute_path(Path(__file__).parent / "./__data__/стаття 2.txt"))
+
 
         algorithms: tuple = (
             ("Knuth-Morris-Pratt algorithm (all occurrences)", kmp_search, True),
@@ -248,37 +108,69 @@ def search_algorithms_compare() -> None:
             ("Rabin-Karp algorithm (first occurrence only)", rabin_karp_search, False),
         )
 
-        datasets: list[tuple[str, str, str]] = [
+        datasets_short: list[tuple[str, str, str]] = [
             (
-                f"Article 1: The string that exists in the file",
+                f"Article 1: Exists in the file",
                 article_1,
-                ", що не потрібно розуміти, як влаштовані алгоритми",
+                ", що не потрібно розуміти",
             ),
             (
-                f"Article 1: The string that not exists in the file",
+                f"Article 1: Not exists in the file",
                 article_1,
-                ", що ен потрібно розуміти, кя влаштовані алгоритми",
+                ", що ен потрібно розуміти",
             ),
             (
-                f"Article 2: The string that exists in the file",
+                f"Article 2: Exists in the file",
                 article_2,
-                "кожен елемент має вказівник на наступний елемент",
+                "кожен елемент має вказівник",
             ),
             (
-                f"Article 2: The string that not exists in the file",
+                f"Article 2: Not exists in the file",
                 article_2,
-                "кожен лементе має вказівник на ступнийна елемент",
+                "кожен лементе має вказівник",
+            ),
+        ]
+
+        datasets_long: list[tuple[str, str, str]] = [
+            (
+                f"Article 1: Exists in the file",
+                article_1,
+                ", що не потрібно розуміти, як влаштовані алгоритми. Фундаментальні знання допомагають дізнатися, що всередині, як воно працює і чому одне рішення краще",
+            ),
+            (
+                f"Article 1: Not exists in the file",
+                article_1,
+                ", що ен потрібно розуміти, кя влаштовані алгоритми. Фундаментальні знання допомагають знатисяді, що всередині, як воно і чому одне рішення краще",
+            ),
+            (
+                f"Article 2: Exists in the file",
+                article_2,
+                "кожен елемент має вказівник на наступний елемент. Основна перевага цієї структури полягає у сталому часі додавання нового елементу.",
+            ),
+            (
+                f"Article 2: Not exists in the file",
+                article_2,
+                "кожен лементе має вказівник на ступнийна елемент. Основна перевага єїці структури полягає у часі додавання нового елементу.",
             ),
         ]
 
         search_times: dict[str, dict[str, float]] = {}
         for algorith_name, sort_func, find_all in algorithms:
             times: dict[str, float] = {}
-            for name, text, search_pattern in datasets:
+            for name, text, search_pattern in datasets_short:
                 times[name] = timeit.timeit(lambda: sort_func(text, search_pattern, find_all=find_all), number=10)
             search_times[algorith_name] = times
 
-        print_tests_result(datasets, search_times)
+        print_tests_result("Short pattern search", datasets_short, search_times)
+
+        search_times = {}
+        for algorith_name, sort_func, find_all in algorithms:
+            times: dict[str, float] = {}
+            for name, text, search_pattern in datasets_long:
+                times[name] = timeit.timeit(lambda: sort_func(text, search_pattern, find_all=find_all), number=10)
+            search_times[algorith_name] = times
+
+        print_tests_result("Long pattern search", datasets_long, search_times)
 
     except Exception as e:
         print(e)
